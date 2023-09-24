@@ -1,4 +1,4 @@
-# RNG-CPP: librandw**
+# RNG-CPP: librandw
 
 ## Overview
 
