@@ -97,9 +97,6 @@ namespace randw {
             gost512,
             hmac256,
             hmac512,
-            md5,
-            sha1,
-            sha128,
             sha256,
             sha512,
         };
@@ -324,12 +321,6 @@ namespace randw {
                     case randw::hash_mode::hmac512:
                         return 0;
 
-                    case randw::hash_mode::md5:
-                        return to_double(to_uint64(md5(data)));
-                    case randw::hash_mode::sha1:
-                        return to_double(to_uint64(sha1(data)));
-                    case randw::hash_mode::sha128:
-                        return to_double(to_uint64(sha128(data)));
                     case randw::hash_mode::sha256:
                         return to_double(to_uint64(sha256(data)));
                     case randw::hash_mode::sha512:
@@ -371,38 +362,10 @@ namespace randw {
 
         private:
 
-            static auto md5(string const& data)->string {
-                MD5_CTX CTX;
-                const int hash_length = MD5_LENGTH;
-                char hash[hash_length];
-                std::memset(hash, 0, MD5_LENGTH);
-                MD5_Init(&CTX);
-                MD5_Update(&CTX, (unsigned char *) data.c_str(), data.size());
-                MD5_Final((unsigned char *) hash, &CTX);
-                return string(hash);
-            };
-            static auto sha1(string const& data)->string {
-                unsigned char hash[SHA_DIGEST_LENGTH];
-                SHA_CTX CTX;
-                SHA1_Init(&CTX);
-                SHA1_Update(&CTX, data.c_str(), data.size());
-                SHA1_Final(hash, &CTX);
-                std::array<uint8_t, SHA_DIGEST_LENGTH> tmp;
-                for (auto i = 0; i < SHA_DIGEST_LENGTH; i++) tmp[i] = hash[i];
-                return string(std::begin(tmp), std::end(tmp));
-            };
-            static auto sha128(string const& data)->string {
-                unsigned char hash[SHA256_DIGEST_LENGTH];
-                SHA256_CTX CTX;
-                SHA256_Init(&CTX);
-                SHA256_Update(&CTX, data.c_str(), data.size());
-                SHA256_Final(hash, &CTX);
-                std::array<uint8_t, 16> tmp;
-                for (auto i = 0; i < SHA128_DIGEST_LENGTH; i++) tmp[i] = hash[i * 2];
-                return string(std::begin(tmp), std::end(tmp));
-            };
             static auto sha256(string const& data)->string {
+
                 unsigned char hash[SHA256_DIGEST_LENGTH];
+#if(OPENSSL_VERSION_MAJOR < 3)
                 SHA256_CTX CTX;
                 SHA256_Init(&CTX);
                 SHA256_Update(&CTX, data.c_str(), data.size());
@@ -410,44 +373,92 @@ namespace randw {
                 std::array<uint8_t, 32> tmp;
                 for (auto i = 0; i < SHA256_DIGEST_LENGTH; i++) tmp[i] = hash[i];
                 return string(std::begin(tmp), std::end(tmp));
+#else
+                SHA256(
+                        reinterpret_cast<unsigned char const*> (data.c_str()),
+                        static_cast<int> (data.size()),
+                        hash
+                        );
+#endif
+                return string{reinterpret_cast<char const*> (hash), SHA256_DIGEST_LENGTH};
+
             };
             static auto sha512(string const& data)->string {
+
                 unsigned char hash[SHA512_DIGEST_LENGTH];
+#if(OPENSSL_VERSION_MAJOR < 3)
                 SHA512_CTX CTX;
                 SHA512_Init(&CTX);
                 SHA512_Update(&CTX, data.c_str(), data.size());
                 SHA512_Final(hash, &CTX);
+
+                // @TODO
                 std::array<uint8_t, 64> tmp;
                 for (auto i = 0; i < SHA512_DIGEST_LENGTH; i++) tmp[i] = hash[i];
                 return string(std::begin(tmp), std::end(tmp));
+#else
+                SHA512(
+                        reinterpret_cast<unsigned char const*> (data.c_str()),
+                        static_cast<int> (data.size()),
+                        hash
+                        );
+#endif
+                return string{reinterpret_cast<char const*> (hash), SHA512_DIGEST_LENGTH};
             };
 
         private:
 
-            static auto hmac128(string const& key, string const& message)->string {
-                return hmac256(key, message).substr(0, 32);
-            };
-            static auto hmac256(string const& key_, string const& message)->string {
-                string key(key_.c_str());
+            static auto hmac256(string const& key_, string const& msg)->string {
+
                 unsigned char hash[SHA256_DIGEST_LENGTH];
+#if(OPENSSL_VERSION_MAJOR < 3)
+                string key(key_.c_str());
                 HMAC_CTX *CTX = HMAC_CTX_new();
                 HMAC_Init_ex(CTX, (unsigned char *) key.c_str(), key.length(), EVP_sha256(), NULL);
-                HMAC_Update(CTX, (unsigned char *) message.c_str(), message.length());
+                HMAC_Update(CTX, (unsigned char *) msg.c_str(), msg.length());
                 unsigned int len = SHA256_DIGEST_LENGTH;
                 HMAC_Final(CTX, hash, &len);
                 HMAC_CTX_free(CTX);
-                return string(reinterpret_cast<char*> (hash), len);
+#else
+                unsigned int len;
+                HMAC(
+                        EVP_sha256(),
+                        key_.c_str(),
+                        static_cast<int> (key_.size()),
+                        reinterpret_cast<unsigned char const*> (msg.c_str()),
+                        static_cast<int> (msg.size()),
+                        hash,
+                        &len
+                        );
+#endif
+                return string{reinterpret_cast<char const*> (hash), len};
+
             };
-            static auto hmac512(string const& key_, string const& message)->string {
-                string key(key_.c_str());
+            static auto hmac512(string const& key_, string const& msg)->string {
+
                 unsigned char hash[SHA512_DIGEST_LENGTH];
+#if(OPENSSL_VERSION_MAJOR < 3)
+                string key(key_.c_str());
                 HMAC_CTX *CTX = HMAC_CTX_new();
-                HMAC_Init_ex(CTX, &key, key.length(), EVP_sha512(), NULL);
-                HMAC_Update(CTX, (unsigned char *) message.c_str(), message.length());
+                HMAC_Init_ex(CTX, (unsigned char *) key.c_str(), key.length(), EVP_sha512(), NULL);
+                HMAC_Update(CTX, (unsigned char *) msg.c_str(), msg.length());
                 unsigned int len = SHA512_DIGEST_LENGTH;
                 HMAC_Final(CTX, hash, &len);
                 HMAC_CTX_free(CTX);
-                return string(reinterpret_cast<char*> (hash), len);
+#else
+                unsigned int len;
+                HMAC(
+                        EVP_sha512(),
+                        key_.c_str(),
+                        static_cast<int> (key_.size()),
+                        reinterpret_cast<unsigned char const*> (msg.data()),
+                        static_cast<int> (msg.size()),
+                        hash,
+                        &len
+                        );
+#endif
+                return string{reinterpret_cast<char const*> (hash), len};
+
             };
 
         };
