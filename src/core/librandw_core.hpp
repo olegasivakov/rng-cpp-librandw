@@ -59,7 +59,6 @@
 #include <openssl/sha.h>
 
 #include "../vars/crypto/vars_crypto.hpp"
-#include "../vars/locale/vars_locale.h"
 
 typedef uint8_t Vint8[BLOCK_SIZE];
 
@@ -82,41 +81,15 @@ second_t< typename map_t::value_type > second(const map_t& m) {
 
 namespace randw {
 
-    namespace seed_mode {
-
-        enum {
-            blind = 0,
-            pkcs11
-        };
-    };
-
     namespace hash_mode {
 
         enum {
             gost256 = 0,
             gost512,
-            hmac256,
-            hmac512,
+            //hmac256,
+            //hmac512,
             sha256,
             sha512,
-        };
-    };
-
-    namespace loc {
-
-        enum {
-            // ISO-639-1-based Language Codes
-
-            zhHans = 0, // Chinese (simplified)
-            zhHant, // Chinese (traditional)
-            cs, // Czech
-            en, // English
-            fr, // French
-            it, // Italian
-            ja, // Japanese
-            ko, // Korean
-            pt, // Portuguese
-            es, // Spanish
         };
     };
 
@@ -152,6 +125,7 @@ namespace randw {
                     gost::_final(CTX);
                 }
 
+                // 512 | 256
                 if (512 == hashSize) {
                     const int n = 0;
                     std::bitset<sizeof (uint8_t) * 64 - n > bits;
@@ -285,8 +259,8 @@ namespace randw {
                     data += 64;
                     len -= 64;
                 }
+                size_t size;
                 while (len) {
-                    size_t size;
                     size = 64 - CTX->buf_size;
                     if (size > len)
                         size = len;
@@ -317,9 +291,9 @@ namespace randw {
                         return to_double(gost::hash(data, 512));
 
                         // @TODO
-                    case randw::hash_mode::hmac256:
-                    case randw::hash_mode::hmac512:
-                        return 0;
+                    //case randw::hash_mode::hmac256:
+                    //case randw::hash_mode::hmac512:
+                    //    return 0;
 
                     case randw::hash_mode::sha256:
                         return to_double(to_uint64(sha256(data)));
@@ -353,6 +327,9 @@ namespace randw {
 
                 return res;
             };
+            
+            // @TODO
+            // Add 2nd step to make a smooth distribution
             static auto to_double(uint64_t hash)->double {
                 std::stringstream ss;
                 ss << std::fixed << std::setprecision(21) << hash;
@@ -478,8 +455,7 @@ namespace randw {
                         ts(counter),
                         ts(counter) % PRIME1,
                         ts(counter) % PRIME2,
-                    })ss << ";" << var;
-                // @TODO ss.seekp()
+                    }) ss << ";" << var;
                 return ss.str();
             };
 
@@ -489,10 +465,13 @@ namespace randw {
                 if (UINT8_MAX < counter) counter = 0;
 
                 uint64_t start = ts(counter) + counter++;
-                random = randw::lib::hash::get(std::to_string(start));
-                for (auto i = 0; i < len(counter, start); i++) {
-                    random = randw::lib::hash::get(make_str(counter, random), hash_mode);
-                }
+                random = randw::lib::hash::get(
+                        std::to_string(start),
+                        hash_mode);
+                for (auto i = 0; i < len(counter, start); i++)
+                    random = randw::lib::hash::get(
+                        make_str(counter, random),
+                        hash_mode);
                 return this;
             };
 
@@ -506,32 +485,17 @@ namespace randw {
                         .count();
             };
             auto ts(uint64_t &counter)->uint64_t {
-                ++counter;
-                return std::chrono::duration_cast<
-                        std::chrono::nanoseconds>(
-                        std::chrono::high_resolution_clock::now()
-                        .time_since_epoch())
-                        .count() +
-                        std::chrono::duration_cast<
-                        std::chrono::nanoseconds>(
-                        std::chrono::high_resolution_clock::now()
-                        .time_since_epoch())
-                        .count() % counter;
+                return ts() + ts() % ++counter;
             };
             auto len(uint64_t &counter, uint64_t start)->uint64_t {
-                int add = ts(counter) - ts(counter);
-                if (0 > add) add = add *-1;
-                return (ts(counter) - start) * add % FACTOR1;
+                return (ts(counter) - start) *
+                        std::abs((long long) (ts(counter) - ts(counter))) % FACTOR;
             };
 
         public:
 
-            auto set_factor_1(uint64_t v)->generator* {
-                this->FACTOR1 = v;
-                return this;
-            };
-            auto set_factor_2(uint64_t v)->generator* {
-                this->FACTOR2 = v;
+            auto set_factor(uint64_t v)->generator* {
+                this->FACTOR = v;
                 return this;
             };
             auto set_prime_1(uint64_t v)->generator* {
@@ -545,8 +509,7 @@ namespace randw {
 
         private:
 
-            uint64_t FACTOR1 = 41,
-                    FACTOR2 = 7,
+            uint64_t FACTOR = 41,
                     PRIME1 = 45212177,
                     PRIME2 = 193877777
                     ;
@@ -617,12 +580,10 @@ namespace randw {
             throw std::runtime_error(string("Min should be never be greater or equals to max"));
         uint64_t c = 0;
         double r = 0;
-        uint64_t result = 0;
         randw::lib::generator::instance()
                 ->run(c, r, hash_mode)
                 ->dispose();
-        result = r * (max - min + 2) + min - 1;
-        return result;
+        return r * (max - min + 2) + min - 1;
     };
 
     /**
@@ -671,92 +632,6 @@ namespace randw {
                 hash_mode
                 ));
         return res;
-    }
-
-    /**
-     * Generates a seed phrase
-     *
-     * @param size of seed phrase
-     * @param seed mode algorithm
-     * <ul>
-     * <li>randw::seed_mode::blind</li>
-     * <li>randw::seed_mode::pkcs11</li>
-     * </ul>
-     * @param locale. Supported languages are:
-     * <ul>
-     * <li>randw::loc::zhHans   //Chinese (simplified)</li>
-     * <li>randw::loc::zh   //synonym for Chinese (simplified)</li>
-     * <li>randw::loc::zhHant   // Chinese (traditional)</li>
-     * <li>randw::loc::cs       // Czech</li>
-     * <li>randw::loc::en       // English</li>
-     * <li>randw::loc::fr       // French</li>
-     * <li>randw::loc::it       // Italian</li>
-     * <li>randw::loc::ja       // Japanese</li>
-     * <li>randw::loc::ko       // Korean</li>
-     * <li>randw::loc::pt       // Portuguese</li>
-     * <li>randw::loc::es       // Spanish</li>
-     * </ul>
-     * @param phrases
-     * @return seed phrase as vector of words
-     */
-    auto get_seed(int size = 12, int mode = randw::seed_mode::blind, int locale = 3, vector<string> phrases = {}, int hash_mode = randw::hash_mode::sha512)->vector<string> {
-        if (phrases.empty()) {
-            map<int, vector < string >> seeds = {
-
-                {randw::loc::zhHans, randw::lib::locale::zhHans()},
-                {randw::loc::zhHans, randw::lib::locale::zhHans()},
-                {randw::loc::zhHant, randw::lib::locale::zhHant()},
-                {randw::loc::cs, randw::lib::locale::cs()},
-                {randw::loc::en, randw::lib::locale::en()},
-                {randw::loc::fr, randw::lib::locale::fr()},
-                {randw::loc::it, randw::lib::locale::it()},
-                {randw::loc::ja, randw::lib::locale::ja()},
-                {randw::loc::ko, randw::lib::locale::ko()},
-                {randw::loc::pt, randw::lib::locale::pt()},
-                {randw::loc::es, randw::lib::locale::es()},
-
-            };
-
-            if (seeds.find(locale) == seeds.end())
-                throw std::runtime_error(string("Language not found"));
-            phrases = seeds.at(locale);
-        }
-
-        /**
-         * Blind seed vector
-         * @param size
-         * @param mode
-         * @param locale
-         * @param phrases
-         * @return
-         */
-        auto seed_blind = [](int size, int locale, vector<string> phrases, int hash_mode = randw::hash_mode::sha512)->vector<string> {
-            vector<string> seed(size);
-            for (int i = 0; i < size; i++) seed.at(i) =
-                    phrases.at(randw::get_range(0,
-                    phrases.size() - 1,
-                    hash_mode
-                    ));
-            return seed;
-        };
-
-        /**
-         * PKCS#11 seed vector
-         * @param size
-         * @param mode
-         * @param locale
-         * @param phrases
-         * @return
-         */
-        auto seed_pkcs11 = [](int size, int locale, vector<string> phrases, int hash_mode = randw::hash_mode::sha512)->vector<string> {
-            return {};
-        };
-
-        switch (mode) {
-            case randw::seed_mode::blind: return seed_blind(size, locale, phrases, hash_mode);
-            case randw::seed_mode::pkcs11: return seed_pkcs11(size, locale, phrases, hash_mode);
-        }
-        throw std::runtime_error(string("Seed generator returns nothing"));
     }
 
 };

@@ -102,15 +102,6 @@ void testGenerate5() {
     }
 }
 
-void testGenerate6() {
-    for (int i = 0; i < ATTEMPTS; i++) {
-        std::cout << std::endl << "ATTEMPT #" << i + 1 << std::endl;
-        for (string item : randw::get_seed(12, randw::loc::zhHans))
-            std::cout << item << " ";
-        std::cout << std::endl;
-    }
-}
-
 /**
  * Not implemented
  */
@@ -124,11 +115,12 @@ void testGenerate7() {
 
 void testGenerate8() {
     std::mutex m;
-    int count = 1000000;
+    int count = 10000000;
     map<double, uint64_t> list;
     static auto run = [ & ](int k) {
         for (int i = 0; i < count; i++) {
-            auto r = randw::get(randw::hash_mode::gost512);
+            //auto r = randw::get(randw::hash_mode::gost512);
+            auto r = randw::get(randw::hash_mode::sha512);
 
             m.lock();
 
@@ -183,10 +175,6 @@ int main(int argc, char** argv) {
     std::cout << std::endl << "- - - - -" << std::endl << "TEST STARTED testGenerate5()" << std::endl;
     testGenerate5();
     std::cout << std::endl << "TEST FINISHED testGenerate5()" << std::endl;
-
-    std::cout << std::endl << "- - - - -" << std::endl << "TEST STARTED testGenerate6()" << std::endl;
-    testGenerate6();
-    std::cout << std::endl << "TEST FINISHED testGenerate6()" << std::endl;
 
     std::cout << std::endl << "- - - - -" << std::endl << "TEST STARTED testGenerate7()" << std::endl;
     testGenerate7();
