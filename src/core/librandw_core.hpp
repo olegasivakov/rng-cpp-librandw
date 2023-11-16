@@ -58,6 +58,8 @@
 #include <openssl/crypto.h>
 #include <openssl/sha.h>
 
+#include <openssl/bn.h>
+
 #include "../vars/crypto/vars_crypto.hpp"
 
 typedef uint8_t Vint8[BLOCK_SIZE];
@@ -112,7 +114,7 @@ namespace randw {
 
         public:
 
-            static auto hash(string const &str, int hashSize = 512)->uint64_t {
+            static auto hash(string const &str, int hashSize = 512)->BIGNUM* {
                 ThContext *CTX = (ThContext*) (malloc(sizeof (ThContext)));
                 uint8_t *buffer;
 
@@ -125,27 +127,24 @@ namespace randw {
                     gost::_final(CTX);
                 }
 
-                // 512 | 256
-                if (512 == hashSize) {
-                    const int n = 0;
-                    std::bitset<sizeof (uint8_t) * 64 - n > bits;
-                    for (int i = n; i < 64; i++)
-                        for (int j = 0; j < 8; ++j)
-                            bits[i - n + j] = bits[i - n + j] ^ (CTX->hash[i] & (1 << j)) != 0;
-                    free(buffer);
-                    free(CTX);
-                    return bits.to_ullong();
-                } else {
-                    const int n = 32;
-                    std::bitset<sizeof (uint8_t) * 64 - n > bits;
-                    for (int i = n; i < 64; i++)
-                        for (int j = 0; j < 8; ++j)
-                            bits[i - n + j] = bits[i - n + j] ^ (CTX->hash[i] & (1 << j)) != 0;
-                    free(buffer);
-                    free(CTX);
-                    return bits.to_ullong();
+                string data;
+                switch (hashSize) {
+                    case 256:
+                    {
+                        for (auto i = 32; i < 64; i++)
+                            data += CTX->hash[i];
+                        break;
+                    }
+                    case 512:
+                    {
+                        for (auto i = 0; i < 64; i++)
+                            data += CTX->hash[i];
+                        break;
+                    }
                 }
-                return 0;
+                free(buffer);
+                free(CTX);
+                return BN_bin2bn((unsigned char*) data.c_str(), data.size(), NULL);
             };
 
         private:
@@ -286,21 +285,46 @@ namespace randw {
             static auto get(string const& data, int hash_mode = randw::hash_mode::sha512)->double {
                 switch (hash_mode) {
                     case randw::hash_mode::gost256:
-                        return to_double(gost::hash(data, 256));
+                        return to_double(BN_bn2dec(gost::hash(data, 256)), 64);
                     case randw::hash_mode::gost512:
-                        return to_double(gost::hash(data, 512));
+                        return to_double(BN_bn2dec(gost::hash(data, 512)), 128);
 
                         // @TODO
-                    //case randw::hash_mode::hmac256:
-                    //case randw::hash_mode::hmac512:
-                    //    return 0;
+                        //case randw::hash_mode::hmac256:
+                        //case randw::hash_mode::hmac512:
+                        //    return 0;
 
                     case randw::hash_mode::sha256:
-                        return to_double(to_uint64(sha256(data)));
+                        return to_double(to_bn_dec(sha256(data)), 64);
                     case randw::hash_mode::sha512:
-                        return to_double(to_uint64(sha512(data)));
+                        return to_double(to_bn_dec(sha512(data)), 128);
                 }
                 return 0.0;
+            };
+            static auto bn(string const& data, int hash_mode = randw::hash_mode::sha512)->BIGNUM* {
+                switch (hash_mode) {
+                    case randw::hash_mode::gost256:
+                        return gost::hash(data, 256);
+                    case randw::hash_mode::gost512:
+                        return gost::hash(data, 512);
+
+                        // @TODO
+                        //case randw::hash_mode::hmac256:
+                        //case randw::hash_mode::hmac512:
+                        //    return 0;
+
+                    case randw::hash_mode::sha256:
+                    {
+                        auto data_ = sha256(data);
+                        return BN_bin2bn((unsigned char*) data_.c_str(), data_.size(), NULL);
+                    }
+                    case randw::hash_mode::sha512:
+                    {
+                        auto data_ = sha512(data);
+                        return BN_bin2bn((unsigned char*) data_.c_str(), data_.size(), NULL);
+                    }
+                }
+                return NULL;
             };
             static auto hmac(string &key, string& message, int size = 256)->string {
                 return "";
@@ -308,34 +332,12 @@ namespace randw {
 
         private:
 
-            static auto to_uint64(string const& data)->uint64_t {
-                return to_uint64(data.size(), (unsigned char *) data.c_str());
-            }
-
-            static auto to_uint64(size_t n, unsigned char * data)->uint64_t {
-                uint64_t res = 0;
-                size_t b;
-
-                for (b = 0; b < n / 8; ++b) {
-                    res <<= 8;
-                    res += data[b];
-                }
-
-                const size_t r = n % 8;
-                res <<= r;
-                res += (data[b] >> (8 - r));
-
-                return res;
+            static auto to_bn_dec(string const& data)->char* {
+                return BN_bn2dec(BN_bin2bn((unsigned char*) data.c_str(), data.size(), NULL));
             };
-            
-            // @TODO
-            // Add 2nd step to make a smooth distribution
-            static auto to_double(uint64_t hash)->double {
-                std::stringstream ss;
-                ss << std::fixed << std::setprecision(21) << hash;
-                while (ss.str().size() < 21) ss << "0";
-                return (double) std::stod(ss.str().substr(0, 21)) / pow(10, 21);
-            }
+            static auto to_double(char *c, int power)->double {
+                return (double) std::stod(c) / pow(16, power);
+            };
 
         private:
 
@@ -458,6 +460,20 @@ namespace randw {
                     }) ss << ";" << var;
                 return ss.str();
             };
+            auto make_str(uint64_t &counter, BIGNUM *random)->string {
+                std::stringstream ss;
+                ss
+                        << BN_bn2hex(random) << ";"
+                        << counter++ << ";"
+                        ;
+                for (auto var :{
+                        ts(),
+                        ts(counter),
+                        ts(counter) % PRIME1,
+                        ts(counter) % PRIME2,
+                    }) ss << ";" << var;
+                return ss.str();
+            };
 
         public:
 
@@ -473,6 +489,22 @@ namespace randw {
                         make_str(counter, random),
                         hash_mode);
                 return this;
+            };
+
+            auto bn(uint64_t &counter, int hash_mode = randw::hash_mode::sha512)->BIGNUM* {
+                if (UINT8_MAX < counter) counter = 0;
+
+                BIGNUM *random;
+                uint64_t start = ts(counter) + counter++;
+                random = randw::lib::hash::bn(
+                        std::to_string(start),
+                        hash_mode);
+                for (auto i = 0; i < len(counter, start); i++)
+                    random = randw::lib::hash::bn(
+                        make_str(counter, random),
+                        hash_mode);
+
+                return random;
             };
 
         private:
@@ -583,7 +615,7 @@ namespace randw {
         randw::lib::generator::instance()
                 ->run(c, r, hash_mode)
                 ->dispose();
-        return r * (max - min + 2) + min - 1;
+        return r * (max - min) + min;
     };
 
     /**
@@ -632,6 +664,41 @@ namespace randw {
                 hash_mode
                 ));
         return res;
+    }
+
+    namespace bignum {
+        /**
+         * Generates random OpenSSL BIGNUM pointer
+         * @param hash_mode
+         * @return BIGNUM*
+         */
+        auto get(int hash_mode = randw::hash_mode::sha512)->BIGNUM* {
+            uint64_t c = 0;
+            auto gen = randw::lib::generator::instance();
+            BIGNUM *bn = gen->bn(c, hash_mode);
+            gen->dispose();
+            return bn;
+        }
+
+        /**
+         * Generates random OpenSSL BIGNUM represented as decimal string.
+         * Conversion from bn2dec to real dec is possible by dividing
+         * the result to pow(16,64|128).
+         * @param hash_mode
+         * @return BIGNUM decimal string
+         */
+        auto dec(int hash_mode = randw::hash_mode::sha512)->string {
+            return string(BN_bn2dec(get(hash_mode)));
+        }
+
+        /**
+         * Generates random OpenSSL BIGNUM represented as hex string
+         * @param hash_mode
+         * @return BIGNUM hex string
+         */
+        auto hex(int hash_mode = randw::hash_mode::sha512)->string {
+            return string(BN_bn2hex(get(hash_mode)));
+        }
     }
 
 };

@@ -44,9 +44,20 @@ using namespace std;
  */
 
 void testGenerate() {
+    std::map<int, int> rands;
+    int k = 10;
+    for (int i = 0; i < k; i++) {
+        rands.insert({i, 0});
+    }
     for (int i = 0; i < ATTEMPTS; i++) {
-        std::cout << std::endl << "ATTEMPT #" << i + 1 << std::endl;
-        std::cout << randw::get() << std::endl;
+        //std::cout << std::endl << "ATTEMPT #" << i + 1 << std::endl;
+        //std::cout << (int) (randw::get(randw::hash_mode::gost512) * 10) << std::endl;
+        int r = (int) (randw::get(randw::hash_mode::gost512) * k);
+        rands.at(r)++;
+    }
+    for (int i = 0; i < k; i++) {
+        //if(1 < rands.at(i))
+        std::cout << i << "\t" << rands.at(i) << std::endl;
     }
 }
 
@@ -68,6 +79,7 @@ void testGenerate3() {
         map<int, int> results;
         for (int i = 0; i < 1000; i++) {
             int result = randw::get_range(min, max, randw::hash_mode::sha512);
+            //std::cout << result << std::endl;
             if (results.find(result) == results.end())
                 results.insert({result, 0});
             results.at(result)++;
@@ -108,8 +120,12 @@ void testGenerate5() {
 void testGenerate7() {
     for (int i = 0; i < ATTEMPTS; i++) {
         std::cout << std::endl << "ATTEMPT #" << i + 1 << std::endl;
-        //randw::lib::generator::uint256 r = randw::get256();
-        //std::cout << r.a << " " << r.b << " " << r.c << " " << r.d << std::endl;
+        std::cout << "SHA HASHING" << std::endl;
+        std::cout << randw::bignum::dec() << std::endl;
+        std::cout << randw::bignum::hex() << std::endl;
+        std::cout << "GOST HASHING" << std::endl;
+        std::cout << randw::bignum::dec(randw::hash_mode::gost512) << std::endl;
+        std::cout << randw::bignum::hex(randw::hash_mode::gost512) << std::endl;
     }
 }
 
@@ -120,7 +136,7 @@ void testGenerate8() {
     static auto run = [ & ](int k) {
         for (int i = 0; i < count; i++) {
             //auto r = randw::get(randw::hash_mode::gost512);
-            auto r = randw::get(randw::hash_mode::sha512);
+            auto r = randw::get(randw::hash_mode::sha256);
 
             m.lock();
 
