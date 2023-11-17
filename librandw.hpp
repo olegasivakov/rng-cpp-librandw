@@ -31,5 +31,14 @@
 
 #ifndef LIBRANDW_HPP
 #define LIBRANDW_HPP
+
+/**
+ * VERSION
+ */
+#define LIBRANDW_VERSION  0.1.5
+
+/**
+ * LIBRANDW
+ */
 #include "src/core/librandw_core.hpp"
 #endif /* LIBRANDW_HPP */

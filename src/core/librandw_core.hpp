@@ -32,6 +32,39 @@
 #ifndef LIBRANDW_CORE_HPP
 #define LIBRANDW_CORE_HPP
 
+/**
+ * MACROS
+ */
+
+/**
+ * SECTION 1: VERSION DATA.  These will change for each release
+ */
+
+/*
+ * These macros express version number MAJOR.MINOR.PATCH exactly
+ */
+#define LIBRANDW_VERSION_MAJOR  0
+#define LIBRANDW_VERSION_MINOR  1
+#define LIBRANDW_VERSION_PATCH  5
+
+/**
+ * SECTION 2: IV initial value
+ */
+
+// 1st value for IV. Change if need
+#define SET_IV "LIBRANDW"
+
+/**
+ * SECTION 3: Macros for tests
+ */
+
+// Uncomment if need for tests
+//#define ALLOW_STAT
+
+/**
+ * LIBRANDW
+ */
+
 #include <algorithm>
 #include <bitset>
 #include <chrono>
@@ -61,12 +94,22 @@
 #include <openssl/bn.h>
 
 #include "../vars/crypto/vars_crypto.hpp"
+#include "../vendor/uint256/uint256_t.h"
 
 typedef uint8_t Vint8[BLOCK_SIZE];
 
 using std::map;
 using std::string;
 using std::vector;
+
+#ifdef ALLOW_STAT
+
+struct stat_t {
+    int iters = 0;
+    uint64_t end = 0, start = 0;
+};
+stat_t STAT;
+#endif
 
 template< typename pair_t >
 struct second_t {
@@ -88,6 +131,7 @@ namespace randw {
         enum {
             gost256 = 0,
             gost512,
+            // @TODO
             //hmac256,
             //hmac512,
             sha256,
@@ -330,7 +374,7 @@ namespace randw {
                 return "";
             };
 
-        private:
+        public:
 
             static auto to_bn_dec(string const& data)->char* {
                 return BN_bn2dec(BN_bin2bn((unsigned char*) data.c_str(), data.size(), NULL));
@@ -450,54 +494,99 @@ namespace randw {
                 ss
                         << std::fixed << std::setprecision(54)
                         << random << ";"
-                        << counter++ << ";"
-                        ;
+                        << counter++;
                 for (auto var :{
                         ts(),
-                        ts(counter),
-                        ts(counter) % PRIME1,
-                        ts(counter) % PRIME2,
+                        ts(counter)
                     }) ss << ";" << var;
+                for (auto prime : PRIMES)
+                    ss << ";" << ts(counter) % prime;
+
+#ifdef ALLOW_STAT
+                //std::cout << ss.str() << std::endl;
+#endif
+
                 return ss.str();
             };
             auto make_str(uint64_t &counter, BIGNUM *random)->string {
                 std::stringstream ss;
                 ss
                         << BN_bn2hex(random) << ";"
-                        << counter++ << ";"
+                        << counter++
                         ;
                 for (auto var :{
                         ts(),
-                        ts(counter),
-                        ts(counter) % PRIME1,
-                        ts(counter) % PRIME2,
+                        ts(counter)
                     }) ss << ";" << var;
+                for (auto prime : PRIMES)
+                    ss << ";" << ts(counter) % prime;
+
+#ifdef ALLOW_STAT
+                //std::cout << ss.str() << std::endl;
+#endif
+
                 return ss.str();
             };
 
         public:
 
             auto run(uint64_t &counter, double &random, int hash_mode = randw::hash_mode::sha512)->generator* {
-                if (UINT8_MAX < counter) counter = 0;
+                if (UINT16_MAX < counter) counter = 0;
+
+#ifdef ALLOW_STAT
+                STAT.iters++;
+                STAT.start = ts();
+#endif
 
                 uint64_t start = ts(counter) + counter++;
-                random = randw::lib::hash::get(
+                BIGNUM *tmp = randw::lib::hash::bn(
                         std::to_string(start),
                         hash_mode);
-                for (auto i = 0; i < len(counter, start); i++)
-                    random = randw::lib::hash::get(
-                        make_str(counter, random),
+                for (string initial : IV)
+                    tmp = randw::lib::hash::bn(string(BN_bn2hex(tmp))
+                        .append(";")
+                        .append(initial),
                         hash_mode);
+                for (auto i = 0; i < len(counter, start); i++) {
+#ifdef ALLOW_STAT
+                    STAT.iters++;
+#endif
+                    tmp = randw::lib::hash::bn(
+                            make_str(counter, tmp),
+                            hash_mode);
+                }
+                random = hash::to_double(BN_bn2dec(tmp), (
+                        hash_mode == randw::hash_mode::gost256 ||
+                        hash_mode == randw::hash_mode::sha256) ?
+                        64 : 128);
+
+#ifdef ALLOW_STAT
+                STAT.end = ts();
+                std::cout
+                        << "i:\t" << STAT.iters << std::endl
+                        << "s:\t" << STAT.start << std::endl
+                        << "e:\t" << STAT.end << std::endl
+                        << "d:\t" << STAT.end - STAT.start << std::endl
+                        << "c:\t" << counter << std::endl;
+                ;
+                //exit(0);
+#endif
+
                 return this;
             };
 
             auto bn(uint64_t &counter, int hash_mode = randw::hash_mode::sha512)->BIGNUM* {
-                if (UINT8_MAX < counter) counter = 0;
+                if (UINT16_MAX < counter) counter = 0;
 
                 BIGNUM *random;
                 uint64_t start = ts(counter) + counter++;
                 random = randw::lib::hash::bn(
                         std::to_string(start),
+                        hash_mode);
+                for (string initial : IV)
+                    random = randw::lib::hash::bn(string(BN_bn2hex(random))
+                        .append(";")
+                        .append(initial),
                         hash_mode);
                 for (auto i = 0; i < len(counter, start); i++)
                     random = randw::lib::hash::bn(
@@ -526,25 +615,35 @@ namespace randw {
 
         public:
 
+            auto set_iv(std::vector<string> iv)->generator* {
+                if (!iv.empty())
+                    this->IV.swap(iv);
+                return this;
+            };
             auto set_factor(uint64_t v)->generator* {
-                this->FACTOR = v;
+                if (0 < v)
+                    this->FACTOR = v;
                 return this;
             };
-            auto set_prime_1(uint64_t v)->generator* {
-                this->PRIME1 = v;
-                return this;
-            };
-            auto set_prime_2(uint64_t v)->generator* {
-                this->PRIME2 = v;
+            auto set_primes(std::vector<uint64_t> primes)->generator* {
+                if (!primes.empty())
+                    this->PRIMES.swap(primes);
                 return this;
             };
 
         private:
 
-            uint64_t FACTOR = 41,
-                    PRIME1 = 45212177,
-                    PRIME2 = 193877777
-                    ;
+            //uint64_t FACTOR = 89519;
+            uint64_t FACTOR = 41;
+            std::vector<string> IV = {
+                SET_IV,
+            };
+            std::vector<uint64_t> PRIMES = {
+                45212177,
+                193877777,
+                1019449,
+                1123909,
+            };
 
         public:
 
@@ -572,47 +671,87 @@ namespace randw {
     // Generation points
 
     /**
-     * Generates PoW-based random number
+     * Generates random number
+     * @param hash_mode
+     * @param factor
+     * @param primes
+     * @param iv
      * @return random double
      */
-    auto get(int hash_mode = randw::hash_mode::sha512)->double {
+    auto get(
+            int hash_mode = randw::hash_mode::sha512,
+            uint64_t factor = 0,
+            std::vector<uint64_t> primes = {},
+    std::vector<string> iv = {}
+    )->double {
         uint64_t c = 0;
         double r = 0;
         randw::lib::generator::instance()
+                ->set_factor(factor)
+                ->set_primes(primes)
+                ->set_iv(iv)
                 ->run(c, r, hash_mode)
                 ->dispose();
         return r;
     };
 
     /**
-     * Generates PoW-based vector of random numbers
+     * Generates vector of random numbers
      * @param int size of vector
+     * @param hash_mode
+     * @param factor
+     * @param primes
+     * @param iv
      * @return vector of random numbers
      */
-    auto get_many(uint16_t size, int hash_mode = randw::hash_mode::sha512)->vector<double> {
+    auto get_many(
+            uint16_t size,
+            int hash_mode = randw::hash_mode::sha512,
+            uint64_t factor = 0,
+            std::vector<uint64_t> primes = {},
+    std::vector<string> iv = {}
+    )->vector<double> {
         if (size > UINT16_MAX)
             throw std::runtime_error(string("Requested list is too long"));
         uint64_t c = 0;
         vector<double> v(size);
-        auto g = randw::lib::generator::instance();
+        auto gen = randw::lib::generator::instance()
+                ->set_factor(factor)
+                ->set_primes(primes)
+                ->set_iv(iv)
+                ;
         for (int i = 0; i < size; i++)
-            g->run(c, v.at(i), hash_mode);
-        g->dispose();
+            gen->run(c, v.at(i), hash_mode);
+        gen->dispose();
         return v;
     };
 
     /**
-     * Generates PoW-based random number in the range between min and max numbers
+     * Generates random number in the range between min and max numbers
      * @param min
      * @param max
+     * @param hash_mode
+     * @param factor
+     * @param primes
+     * @param iv
      * @return random integer
      */
-    auto get_range(uint64_t min, uint64_t max, int hash_mode = randw::hash_mode::sha512)->uint64_t {
+    auto get_range(
+            uint64_t min,
+            uint64_t max,
+            int hash_mode = randw::hash_mode::sha512,
+            uint64_t factor = 0,
+            std::vector<uint64_t> primes = {},
+    std::vector<string> iv = {}
+    )->uint64_t {
         if (min >= max)
             throw std::runtime_error(string("Min should be never be greater or equals to max"));
         uint64_t c = 0;
         double r = 0;
         randw::lib::generator::instance()
+                ->set_factor(factor)
+                ->set_primes(primes)
+                ->set_iv(iv)
                 ->run(c, r, hash_mode)
                 ->dispose();
         return r * (max - min) + min;
@@ -621,22 +760,36 @@ namespace randw {
     /**
      * Shuffles the vector of integers
      * @param input list of integers
+     * @param hash_mode
+     * @param factor
+     * @param primes
+     * @param iv
      * @return shuffled list
      */
-    auto get_shuffled_list(vector<int> &list, int hash_mode = randw::hash_mode::sha512)->vector<int> {
+    auto get_shuffled_list(
+            vector<int> &list,
+            int hash_mode = randw::hash_mode::sha512,
+            uint64_t factor = 0,
+            std::vector<uint64_t> primes = {},
+    std::vector<string> iv = {}
+    )->vector<int> {
         if (list.empty())
             throw std::runtime_error(string("List is empty"));
         map<double, int> tmp;
         vector<int> res;
         {
             uint64_t c = 0;
-            auto g = randw::lib::generator::instance();
+            auto gen = randw::lib::generator::instance()
+                    ->set_factor(factor)
+                    ->set_primes(primes)
+                    ->set_iv(iv)
+                    ;
             for (auto item : list) {
                 double r = 0;
-                g->run(c, r, hash_mode);
+                gen->run(c, r, hash_mode);
                 tmp.insert({r, item});
             }
-            g->dispose();
+            gen->dispose();
         }
         std::transform(
                 tmp.begin(), tmp.end(),
@@ -650,9 +803,20 @@ namespace randw {
      * Generates random string
      * @param size of random string
      * @param symbols for string
+     * @param hash_mode
+     * @param factor
+     * @param primes
+     * @param iv
      * @return random string
      */
-    auto get_string(uint8_t size, string symbols = "", int hash_mode = randw::hash_mode::sha512)->string {
+    auto get_string(
+            uint8_t size,
+            string symbols = "",
+            int hash_mode = randw::hash_mode::sha512,
+            uint64_t factor = 0,
+            std::vector<uint64_t> primes = {},
+    std::vector<string> iv = {}
+    )->string {
         if (size > UINT8_MAX)
             throw std::runtime_error(string("Requested string is too long"));
         if (symbols.empty())
@@ -661,20 +825,35 @@ namespace randw {
         for (int i = 0; i < size; i++) res.at(i) =
                 symbols.at(get_range(0,
                 symbols.size() - 1,
-                hash_mode
-                ));
+                hash_mode,
+                factor,
+                primes,
+                iv));
         return res;
     }
 
     namespace bignum {
+
         /**
          * Generates random OpenSSL BIGNUM pointer
          * @param hash_mode
+         * @param factor
+         * @param primes
+         * @param iv
          * @return BIGNUM*
          */
-        auto get(int hash_mode = randw::hash_mode::sha512)->BIGNUM* {
+        auto get(
+                int hash_mode = randw::hash_mode::sha512,
+                uint64_t factor = 0,
+                std::vector<uint64_t> primes = {},
+        std::vector<string> iv = {}
+        )->BIGNUM* {
             uint64_t c = 0;
-            auto gen = randw::lib::generator::instance();
+            auto gen = randw::lib::generator::instance()
+                    ->set_factor(factor)
+                    ->set_primes(primes)
+                    ->set_iv(iv)
+                    ;
             BIGNUM *bn = gen->bn(c, hash_mode);
             gen->dispose();
             return bn;
@@ -685,20 +864,69 @@ namespace randw {
          * Conversion from bn2dec to real dec is possible by dividing
          * the result to pow(16,64|128).
          * @param hash_mode
+         * @param factor
+         * @param primes
+         * @param iv
          * @return BIGNUM decimal string
          */
-        auto dec(int hash_mode = randw::hash_mode::sha512)->string {
-            return string(BN_bn2dec(get(hash_mode)));
+        auto dec(
+                int hash_mode = randw::hash_mode::sha512,
+                uint64_t factor = 0,
+                std::vector<uint64_t> primes = {},
+        std::vector<string> iv = {}
+        )->string {
+            return string(BN_bn2dec(get(
+                    hash_mode,
+                    factor,
+                    primes,
+                    iv)));
         }
 
         /**
          * Generates random OpenSSL BIGNUM represented as hex string
          * @param hash_mode
+         * @param factor
+         * @param primes
+         * @param iv
          * @return BIGNUM hex string
          */
-        auto hex(int hash_mode = randw::hash_mode::sha512)->string {
-            return string(BN_bn2hex(get(hash_mode)));
+        auto hex(
+                int hash_mode = randw::hash_mode::sha512,
+                uint64_t factor = 0,
+                std::vector<uint64_t> primes = {},
+        std::vector<string> iv = {}
+        )->string {
+            return string(BN_bn2hex(get(
+                    hash_mode,
+                    factor,
+                    primes,
+                    iv)));
         }
+    }
+
+    namespace uint256 {
+
+        /**
+         * Generates uint256_t decimal
+         * @param hash_mode: sha256|gost256
+         * @param factor
+         * @param primes
+         * @param iv
+         * @return 
+         */
+        auto get(
+                int hash_mode = randw::hash_mode::sha256,
+                uint64_t factor = 0,
+                std::vector<uint64_t> primes = {},
+        std::vector<string> iv = {}
+        )->uint256_t {
+            return uint256_t(BN_bn2hex(bignum::get(
+                    hash_mode,
+                    factor,
+                    primes,
+                    iv)), 16);
+        }
+
     }
 
 };

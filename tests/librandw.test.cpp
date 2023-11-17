@@ -33,7 +33,7 @@
 #include <mutex>
 #include <thread>
 
-#include "src/core/librandw_core.hpp"
+#include "./librandw.hpp"
 
 #define ATTEMPTS 5
 
@@ -59,6 +59,7 @@ void testGenerate() {
         //if(1 < rands.at(i))
         std::cout << i << "\t" << rands.at(i) << std::endl;
     }
+    //exit(0);
 }
 
 void testGenerate2() {
@@ -120,12 +121,18 @@ void testGenerate5() {
 void testGenerate7() {
     for (int i = 0; i < ATTEMPTS; i++) {
         std::cout << std::endl << "ATTEMPT #" << i + 1 << std::endl;
-        std::cout << "SHA HASHING" << std::endl;
+        std::cout << "SHA HASHING 512" << std::endl;
         std::cout << randw::bignum::dec() << std::endl;
         std::cout << randw::bignum::hex() << std::endl;
-        std::cout << "GOST HASHING" << std::endl;
+        std::cout << "SHA HASHING 256" << std::endl;
+        std::cout << randw::bignum::dec(randw::hash_mode::sha256) << std::endl;
+        std::cout << randw::uint256::get(randw::hash_mode::sha256) << std::endl;
+        std::cout << "GOST HASHING 512" << std::endl;
         std::cout << randw::bignum::dec(randw::hash_mode::gost512) << std::endl;
         std::cout << randw::bignum::hex(randw::hash_mode::gost512) << std::endl;
+        std::cout << "GOST HASHING 256" << std::endl;
+        std::cout << randw::bignum::dec(randw::hash_mode::gost256) << std::endl;
+        std::cout << randw::uint256::get(randw::hash_mode::gost256) << std::endl;
     }
 }
 
