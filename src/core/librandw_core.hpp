@@ -48,7 +48,7 @@
 #define LIBRANDW_VERSION_PATCH  5
 
 /**
- * SECTION 2: IV initial value
+ * SECTION 2: Settings
  */
 
 // 1st value for IV. Change if need
@@ -326,25 +326,6 @@ namespace randw {
         class hash {
         public:
 
-            static auto get(string const& data, int hash_mode = randw::hash_mode::sha512)->double {
-                switch (hash_mode) {
-                    case randw::hash_mode::gost256:
-                        return to_double(BN_bn2dec(gost::hash(data, 256)), 64);
-                    case randw::hash_mode::gost512:
-                        return to_double(BN_bn2dec(gost::hash(data, 512)), 128);
-
-                        // @TODO
-                        //case randw::hash_mode::hmac256:
-                        //case randw::hash_mode::hmac512:
-                        //    return 0;
-
-                    case randw::hash_mode::sha256:
-                        return to_double(to_bn_dec(sha256(data)), 64);
-                    case randw::hash_mode::sha512:
-                        return to_double(to_bn_dec(sha512(data)), 128);
-                }
-                return 0.0;
-            };
             static auto bn(string const& data, int hash_mode = randw::hash_mode::sha512)->BIGNUM* {
                 switch (hash_mode) {
                     case randw::hash_mode::gost256:
@@ -359,13 +340,13 @@ namespace randw {
 
                     case randw::hash_mode::sha256:
                     {
-                        auto data_ = sha256(data);
-                        return BN_bin2bn((unsigned char*) data_.c_str(), data_.size(), NULL);
+                        auto hash = sha256(data);
+                        return BN_bin2bn((unsigned char*) hash.c_str(), hash.size(), NULL);
                     }
                     case randw::hash_mode::sha512:
                     {
-                        auto data_ = sha512(data);
-                        return BN_bin2bn((unsigned char*) data_.c_str(), data_.size(), NULL);
+                        auto hash = sha512(data);
+                        return BN_bin2bn((unsigned char*) hash.c_str(), hash.size(), NULL);
                     }
                 }
                 return NULL;
@@ -489,25 +470,6 @@ namespace randw {
         class generator {
         private:
 
-            auto make_str(uint64_t &counter, double &random)->string {
-                std::stringstream ss;
-                ss
-                        << std::fixed << std::setprecision(54)
-                        << random << ";"
-                        << counter++;
-                for (auto var :{
-                        ts(),
-                        ts(counter)
-                    }) ss << ";" << var;
-                for (auto prime : PRIMES)
-                    ss << ";" << ts(counter) % prime;
-
-#ifdef ALLOW_STAT
-                //std::cout << ss.str() << std::endl;
-#endif
-
-                return ss.str();
-            };
             auto make_str(uint64_t &counter, BIGNUM *random)->string {
                 std::stringstream ss;
                 ss
@@ -912,7 +874,7 @@ namespace randw {
          * @param factor
          * @param primes
          * @param iv
-         * @return 
+         * @return
          */
         auto get(
                 int hash_mode = randw::hash_mode::sha256,
